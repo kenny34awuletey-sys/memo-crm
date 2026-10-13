@@ -1,1 +1,99 @@
+# ============================================================================
+#  MEMO — tâche S12 : empêcher la mise en pause du projet Supabase
+#
+#  POURQUOI
+#  Sur le plan gratuit, Supabase met un projet en pause après 7 jours sans
+#  aucune activité. Un projet en pause, c'est : plus de connexion, plus de
+#  sauvegarde cloud, plus d'email de confirmation — exactement la panne du
+#  29/09 (« le projet Supabase MEMO est actuellement inactif »), qui avait
+#  bloqué toute la phase 2.
+#
+#  CE QUE FAIT CE FICHIER
+#  Une fois par jour, GitHub envoie une requête de lecture minuscule à la base.
+#  Ça suffit à compter comme activité. La requête ne lit rien : la sécurité au
+#  niveau des lignes renvoie une liste vide à une clé anonyme. Aucune donnée
+#  ne sort, aucun secret n'est exposé.
+#
+#  LA CLÉ PUBLIABLE N'EST PAS UN SECRET
+#  C'est la même clé que celle déjà présente dans index.html, donc déjà
+#  publique et visible par n'importe quel visiteur. Elle est conçue pour ça :
+#  seule la sécurité au niveau des lignes protège les données, pas la clé.
+#  Ne JAMAIS mettre ici la clé « service_role » ni le mot de passe de la base.
+#
+#  SI ÇA CASSE
+#  Le job échoue et GitHub t'envoie un email. C'est volontaire : un réveil
+#  silencieux qui ne réveille plus rien ne sert à rien. Un échec signifie
+#  soit que le projet est déjà en pause, soit que la clé a changé.
+#
+#  À SAVOIR
+#  GitHub désactive les tâches planifiées d'un dépôt resté 60 jours sans
+#  aucun envoi de code. Tant qu'on déploie MEMO, le compteur repart à zéro.
+#  Si le dépôt doit dormir plus longtemps, GitHub envoie un avertissement et
+#  il suffit de cliquer « Enable workflow » dans l'onglet Actions.
+# ============================================================================
 
+name: Garder le projet Supabase actif
+
+on:
+  schedule:
+    # Tous les jours à 06h17 UTC (≈ 07h17 ou 08h17 en France selon la saison).
+    # Minute volontairement décalée : à la minute 0 les files d'attente de
+    # GitHub sont saturées et le déclenchement peut glisser de 30 à 60 min.
+    - cron: '17 6 * * *'
+  # Permet de lancer le réveil à la main depuis l'onglet Actions.
+  # C'est comme ça qu'on le teste sans attendre demain matin.
+  workflow_dispatch:
+
+# Lecture seule : ce workflow n'a aucun droit d'écriture sur le dépôt.
+permissions:
+  contents: read
+
+jobs:
+  reveil:
+    name: Réveiller la base
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      PROJET: fjfqigyxeejxztaivqui
+      CLE_PUBLIABLE: sb_publishable_p1CeJNYZ6XeGmMJHFsLHcA_ntHolXaj
+    steps:
+      - name: Requête de lecture minimale sur crm_state
+        run: |
+          set -euo pipefail
+
+          URL="https://${PROJET}.supabase.co/rest/v1/crm_state?select=user_id&limit=1"
+
+          # --max-time borne l'attente ; --retry couvre un incident réseau passager
+          # sans masquer une vraie panne (3 essais au total, pas davantage).
+          CODE=$(curl -sS -o reponse.txt -w '%{http_code}' \
+                   --max-time 20 --retry 3 --retry-delay 10 --retry-connrefused \
+                   -H "apikey: ${CLE_PUBLIABLE}" \
+                   -H "Authorization: Bearer ${CLE_PUBLIABLE}" \
+                   -H "Accept-Profile: public" \
+                   "$URL" || echo "000")
+
+          echo "Code HTTP : $CODE"
+          echo "Réponse   : $(head -c 300 reponse.txt)"
+
+          case "$CODE" in
+            200)
+              echo "::notice::Projet Supabase actif. Le compteur de 7 jours est remis à zéro."
+              ;;
+            401|403)
+              echo "::error::La clé publiable est refusée ($CODE). Elle a probablement été"
+              echo "::error::régénérée dans Supabase. Il faut la remplacer ici ET dans index.html."
+              exit 1
+              ;;
+            000|5*)
+              echo "::error::Aucune réponse de Supabase ($CODE). Le projet est peut-être déjà"
+              echo "::error::en pause : vérifier sur https://supabase.com/dashboard et le relancer."
+              exit 1
+              ;;
+            *)
+              echo "::error::Réponse inattendue ($CODE). À examiner avant de considérer le réveil comme fait."
+              exit 1
+              ;;
+          esac
+
+      - name: Horodatage
+        run: echo "Réveil effectué le $(date -u '+%d/%m/%Y à %Hh%M UTC')"
