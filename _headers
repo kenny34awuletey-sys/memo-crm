@@ -56,5 +56,7 @@
 
 # La page principale ne doit jamais être servie depuis un cache périmé :
 # sinon une correction de sécurité peut mettre des jours à atteindre un utilisateur.
+/
+  Cache-Control: no-cache
 /index.html
   Cache-Control: no-cache
