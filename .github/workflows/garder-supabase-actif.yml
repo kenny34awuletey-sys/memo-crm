@@ -3,45 +3,44 @@
 #
 #  POURQUOI
 #  Sur le plan gratuit, Supabase met un projet en pause après 7 jours sans
-#  aucune activité. Un projet en pause, c'est : plus de connexion, plus de
-#  sauvegarde cloud, plus d'email de confirmation — exactement la panne du
-#  29/09 (« le projet Supabase MEMO est actuellement inactif »), qui avait
-#  bloqué toute la phase 2.
+#  activité. Un projet en pause, c'est : plus de connexion, plus de sauvegarde
+#  cloud, plus d'email de confirmation — exactement la panne du 29/09 qui
+#  avait bloqué toute la phase 2. Une fois par jour, GitHub réveille la base.
 #
-#  CE QUE FAIT CE FICHIER
-#  Une fois par jour, GitHub envoie une requête de lecture minuscule à la base.
-#  Ça suffit à compter comme activité. La requête ne lit rien : la sécurité au
-#  niveau des lignes renvoie une liste vide à une clé anonyme. Aucune donnée
-#  ne sort, aucun secret n'est exposé.
+#  CE QU'ON APPELLE
+#  La fonction public.ping(), créée le 13/10. Elle ne lit AUCUNE table : elle
+#  renvoie l'heure du serveur. C'est suffisant — ce qui compte est que la base
+#  exécute une requête, pas ce qu'elle renvoie.
+#
+#  Première version (13/10) : elle lisait la table crm_state. Refusée par
+#  Postgres — « permission denied for table crm_state », code 42501. C'était
+#  la bonne réponse : le rôle anonyme n'a aucun privilège sur nos tables, et
+#  il ne faut surtout pas lui en donner pour faire marcher un réveil.
 #
 #  LA CLÉ PUBLIABLE N'EST PAS UN SECRET
-#  C'est la même clé que celle déjà présente dans index.html, donc déjà
-#  publique et visible par n'importe quel visiteur. Elle est conçue pour ça :
-#  seule la sécurité au niveau des lignes protège les données, pas la clé.
+#  C'est la même clé que celle déjà dans index.html, donc déjà publique et
+#  visible par n'importe quel visiteur. Elle est conçue pour ça : ce qui
+#  protège les données, c'est la sécurité au niveau des lignes et les
+#  privilèges Postgres — pas la confidentialité de cette clé.
 #  Ne JAMAIS mettre ici la clé « service_role » ni le mot de passe de la base.
 #
 #  SI ÇA CASSE
-#  Le job échoue et GitHub t'envoie un email. C'est volontaire : un réveil
-#  silencieux qui ne réveille plus rien ne sert à rien. Un échec signifie
-#  soit que le projet est déjà en pause, soit que la clé a changé.
+#  Le job échoue et GitHub envoie un email. C'est volontaire : un réveil
+#  silencieux qui ne réveille plus rien ne sert à rien.
 #
 #  À SAVOIR
 #  GitHub désactive les tâches planifiées d'un dépôt resté 60 jours sans
 #  aucun envoi de code. Tant qu'on déploie MEMO, le compteur repart à zéro.
-#  Si le dépôt doit dormir plus longtemps, GitHub envoie un avertissement et
-#  il suffit de cliquer « Enable workflow » dans l'onglet Actions.
 # ============================================================================
 
 name: Garder le projet Supabase actif
 
 on:
   schedule:
-    # Tous les jours à 06h17 UTC (≈ 07h17 ou 08h17 en France selon la saison).
-    # Minute volontairement décalée : à la minute 0 les files d'attente de
-    # GitHub sont saturées et le déclenchement peut glisser de 30 à 60 min.
+    # Tous les jours à 06h17 UTC. Minute volontairement décalée : à la minute 0
+    # les files d'attente de GitHub sont saturées et le déclenchement glisse.
     - cron: '17 6 * * *'
   # Permet de lancer le réveil à la main depuis l'onglet Actions.
-  # C'est comme ça qu'on le teste sans attendre demain matin.
   workflow_dispatch:
 
 # Lecture seule : ce workflow n'a aucun droit d'écriture sur le dépôt.
@@ -57,43 +56,45 @@ jobs:
       PROJET: fjfqigyxeejxztaivqui
       CLE_PUBLIABLE: sb_publishable_p1CeJNYZ6XeGmMJHFsLHcA_ntHolXaj
     steps:
-      - name: Requête de lecture minimale sur crm_state
+      - name: Appel de la fonction ping
         run: |
           set -euo pipefail
 
-          URL="https://${PROJET}.supabase.co/rest/v1/crm_state?select=user_id&limit=1"
+          URL="https://${PROJET}.supabase.co/rest/v1/rpc/ping"
 
-          # --max-time borne l'attente ; --retry couvre un incident réseau passager
-          # sans masquer une vraie panne (3 essais au total, pas davantage).
           CODE=$(curl -sS -o reponse.txt -w '%{http_code}' \
                    --max-time 20 --retry 3 --retry-delay 10 --retry-connrefused \
+                   -X POST "$URL" \
                    -H "apikey: ${CLE_PUBLIABLE}" \
                    -H "Authorization: Bearer ${CLE_PUBLIABLE}" \
-                   -H "Accept-Profile: public" \
-                   "$URL" || echo "000")
+                   -H "Content-Type: application/json" \
+                   -d '{}' || echo "000")
 
-          echo "Code HTTP : $CODE"
-          echo "Réponse   : $(head -c 300 reponse.txt)"
+          echo "Code HTTP    : $CODE"
+          echo "Heure base   : $(head -c 300 reponse.txt)"
 
           case "$CODE" in
-            200)
-              echo "::notice::Projet Supabase actif. Le compteur de 7 jours est remis à zéro."
+            200|204)
+              echo "::notice::Projet Supabase actif. Le compteur de 7 jours est remis a zero."
               ;;
             401|403)
-              echo "::error::La clé publiable est refusée ($CODE). Elle a probablement été"
-              echo "::error::régénérée dans Supabase. Il faut la remplacer ici ET dans index.html."
+              echo "::error::Requete refusee ($CODE). Deux causes possibles : la cle publiable"
+              echo "::error::a ete regeneree dans Supabase, ou le privilege EXECUTE sur"
+              echo "::error::public.ping() a ete retire au role anon. Verifier dans cet ordre."
+              exit 1
+              ;;
+            404)
+              echo "::error::La fonction public.ping() est introuvable (404). Elle a ete"
+              echo "::error::supprimee, ou le cache de schema PostgREST doit etre recharge."
               exit 1
               ;;
             000|5*)
-              echo "::error::Aucune réponse de Supabase ($CODE). Le projet est peut-être déjà"
-              echo "::error::en pause : vérifier sur https://supabase.com/dashboard et le relancer."
+              echo "::error::Aucune reponse de Supabase ($CODE). Le projet est peut-etre deja"
+              echo "::error::en pause : verifier sur https://supabase.com/dashboard."
               exit 1
               ;;
             *)
-              echo "::error::Réponse inattendue ($CODE). À examiner avant de considérer le réveil comme fait."
+              echo "::error::Reponse inattendue ($CODE). A examiner avant de considerer le reveil comme fait."
               exit 1
               ;;
           esac
-
-      - name: Horodatage
-        run: echo "Réveil effectué le $(date -u '+%d/%m/%Y à %Hh%M UTC')"
