@@ -60,5 +60,3 @@
   for = "/index.html"
   [headers.values]
     Cache-Control = "no-cache"
-
-    
