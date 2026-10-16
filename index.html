@@ -6294,6 +6294,13 @@ function v19MajPastilles(){
   if(bm) bm.setAttribute('aria-label',n?'Messages, '+n+' réponse'+(n>1?'s':'')+' non lue'+(n>1?'s':''):'Messages');
   var base=document.title.replace(/^\(\d+\+?\)\s*/,'');
   document.title=n?'('+txt+') '+base:base;
+  v19PastilleIcone(n);
+}
+/* Pastille sur l'icône de l'appli MEMO (écran d'accueil de l'iPhone, Android, ordinateur). */
+function v19PastilleIcone(n){
+  if(v19PastilleIcone.dernier===n) return; v19PastilleIcone.dernier=n;
+  try{ if('setAppBadge' in navigator){ (n?navigator.setAppBadge(n):navigator.clearAppBadge()).catch(function(){}); } }catch(_){ }
+  try{ if(navigator.serviceWorker&&navigator.serviceWorker.controller) navigator.serviceWorker.controller.postMessage({type:'memo-badge',n:n}); }catch(_){ }
 }
 function v19MarquerLu(client){
   var change=false;

@@ -1,6 +1,23 @@
 /* MEMO — service worker : affiche les notifications « un client a répondu », même MEMO fermé.
    Il ne met rien en cache et ne voit passer aucune page : il ne sert qu'aux notifications. */
 self.addEventListener('install', function () { self.skipWaiting(); });
+
+/* Pastille sur l'icône de l'appli (iPhone en appli d'écran d'accueil, Android, ordinateur) :
+   le nombre de réponses pas encore vues. MEMO le recale à l'ouverture (message « memo-badge »). */
+async function lireCompteur() {
+  try { var r = await (await caches.open('memo-badge')).match('/compteur'); return r ? (parseInt(await r.text(), 10) || 0) : 0; }
+  catch (_) { return 0; }
+}
+async function ecrireCompteur(n) {
+  try { await (await caches.open('memo-badge')).put('/compteur', new Response(String(n))); } catch (_) { }
+  try {
+    if (self.navigator && 'setAppBadge' in self.navigator) { n > 0 ? await self.navigator.setAppBadge(n) : await self.navigator.clearAppBadge(); }
+  } catch (_) { }
+}
+self.addEventListener('message', function (e) {
+  var d = e.data || {};
+  if (d.type === 'memo-badge') e.waitUntil(ecrireCompteur(Math.max(0, parseInt(d.n, 10) || 0)));
+});
 self.addEventListener('activate', function (e) { e.waitUntil(self.clients.claim()); });
 
 self.addEventListener('push', function (e) {
@@ -10,6 +27,7 @@ self.addEventListener('push', function (e) {
     var fenetres = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     // MEMO ouvert quelque part : il relève les réponses tout de suite au lieu d'attendre 90 s.
     fenetres.forEach(function (c) { c.postMessage({ type: 'memo-nouvelle-reponse' }); });
+    await ecrireCompteur((await lireCompteur()) + 1);
     // Toujours afficher la notification : iPhone et Chrome l'exigent pour chaque envoi.
     await self.registration.showNotification(d.titre || 'MEMO', {
       body: d.corps || '',
