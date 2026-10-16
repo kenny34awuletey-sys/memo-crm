@@ -4,6 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>[PRÉPROD] MEMO</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#0a1f1a">
+<link rel="icon" href="/icone-192.png" sizes="192x192">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="MEMO">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap">
 <style>
 /* V18.6 — bandeau des affaires reprises de la V17 (T-P03-06) */
@@ -1513,6 +1520,12 @@ body .v19-acc-sous{ display:block; margin-top:2px; }
 /* --- V19.2 — ENVOI RÉEL DES MAILS ---------------------------------------- */
 #v19Bandeau{position:fixed;left:50%;bottom:calc(18px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:7000;max-width:calc(100vw - 32px);background:#0a1f1a;color:#e8f2ee;border:1px solid #2bf07c;padding:11px 16px;font:600 14px/1.4 system-ui,sans-serif;box-shadow:0 14px 30px -10px rgba(0,0,0,.5)}
 #v19Bandeau[hidden]{display:none}
+.v19-bandeau-voir{margin-left:10px;background:#2bf07c;color:#03140e;border:0;font:700 13px/1 system-ui,sans-serif;padding:7px 12px;cursor:pointer;border-radius:2px}
+#v19Side .v19-pastille,#v19Burger .v19-pastille{display:inline-grid!important;background:#d93a22!important;color:#fff!important;width:auto!important;font-size:11px!important}
+.v19-pastille{display:inline-grid;place-items:center;min-width:19px;height:19px;padding:0 5px;margin-left:auto;background:#d93a22;color:#fff;font:700 11px/1 system-ui,sans-serif;border-radius:2px}
+#v19Burger{position:relative}
+#v19Burger .v19-pastille{position:absolute;top:-6px;right:-6px;margin:0;box-shadow:0 0 0 2px #0a1f1a}
+#v19Side [data-tab="messages"]{display:flex;align-items:center;gap:8px}
 .v19-filet{border-left:3px solid #c98a00;background:rgba(201,138,0,.08);padding:10px 12px;margin-top:10px}
 .v19-filet p{margin:0 0 8px}
 </style>
@@ -2244,6 +2257,7 @@ html.v19-boot #v19Chargement{ display:grid; position:fixed; inset:0; z-index:500
             <button class="btn primary" id="saveAccountBtn">Enregistrer</button>
           </div>
         </div>
+        <div class="panel" id="v19NotifPanel" style="margin-bottom:16px"></div>
 
 
         <div id="guestAccountNotice" class="security-box hidden" style="margin-top:12px">
@@ -3399,6 +3413,7 @@ html.v19-boot #v19Chargement{ display:grid; position:fixed; inset:0; z-index:500
     const c=clientOf(d);
     for(let i=messages.length-1;i>=0;i--){
       const m=messages[i];
+      if(m.auto) continue;
       if((c&&m.clientId&&String(m.clientId)===String(c.id))||(!m.clientId&&fold(m.client)===fold(d.client))) return m;
     }
     return null;
@@ -3976,6 +3991,7 @@ function renderBoard(){
 
   function renderThreadPane(client){
     selectedThreadClient=client;
+    { const tm=document.getElementById('tab-messages'); if(tm&&tm.classList.contains('active')) v19MarquerLu(client); }
     const d=deals.filter(x=>fold(x.client)===fold(client)).sort((a,b)=>isOpen(b)-isOpen(a))[0];
     const ms=clientMessages(client);
     $('#threadPane').innerHTML=`
@@ -5382,7 +5398,7 @@ var V19_MOTS=[
 ];
 function v19DernierMessage(d){
   var c=clientOf(d);
-  var ms=c?messagesOfClient(c):messages.filter(function(m){ return fold(m.client)===fold(d.client); });
+  var ms=(c?messagesOfClient(c):messages.filter(function(m){ return fold(m.client)===fold(d.client); })).filter(function(m){ return !m.auto; });
   return ms[ms.length-1]||null;
 }
 function v19Contexte(d,trace){
@@ -6089,10 +6105,11 @@ document.addEventListener('click',function(e){
 var V19_EMAIL={ enCours:false, releve:false, filetOui:false };
 var V19_CLIC={ signe:'Je signe', temps:'J’ai besoin d’un peu de temps', rappel:'Rappelez-moi', non:'Je ne donne pas suite' };
 
-function v19Bandeau(texte){
+function v19Bandeau(texte,client){
   var b=document.getElementById('v19Bandeau'); if(!b) return;
-  b.textContent=texte; b.hidden=false;
-  clearTimeout(v19Bandeau.t); v19Bandeau.t=setTimeout(function(){ b.hidden=true; },7000);
+  b.innerHTML=escapeHtml(texte)+(client!==undefined?' <button type="button" class="v19-bandeau-voir" data-v19voir="'+escapeHtml(client||'')+'">Voir</button>':'');
+  b.hidden=false;
+  clearTimeout(v19Bandeau.t); v19Bandeau.t=setTimeout(function(){ b.hidden=true; },client!==undefined?12000:7000);
 }
 function v19DernierMailSansReponse(d){
   var lastOut=null, lastIn=null;
@@ -6191,7 +6208,7 @@ function v19AppliquerReponse(row,d,t){
     : row.kind==='auto' ? 'Réponse automatique : '+(mot||row.subject||'')
     : (mot||row.subject||'(message vide)');
   messages.push({id:uid('m'),client:nom,clientId:d?d.clientId:undefined,channel:'Email',direction:'in',
-    at:new Date(row.created_at).toLocaleString('fr-FR'),iso:row.created_at,text:texte,emailId:row.id,auto:row.kind==='auto'||undefined});
+    at:new Date(row.created_at).toLocaleString('fr-FR'),iso:row.created_at,text:texte,emailId:row.id,auto:row.kind==='auto'||undefined,nonLu:row.kind==='auto'?undefined:true});
   if(!d){ logEvent('messages','reply_unmatched','Mail reçu de '+nom+', sans affaire correspondante',null); return null; }
   if(row.kind==='auto'){ logEvent('messages','auto_reply','Réponse automatique de '+d.client+' : la relance reste prévue',{dealId:d.id}); return null; }
   var before={hold:d.hold,next:d.next,actionDate:d.actionDate,priority:d.priority}, resume;
@@ -6201,6 +6218,8 @@ function v19AppliquerReponse(row,d,t){
   else if(row.kind==='clic'&&row.choix==='non'){ d.hold=''; d.next='Clôturer l’affaire (le client ne donne pas suite)'; d.actionDate=today; resume='ne donne pas suite'; }
   else { d.hold=''; d.next='Lire et répondre au mail du client'; d.actionDate=today; resume='a répondu par mail'; }
   d.lastInteractionDate=today; d.updatedAt=new Date().toISOString();
+  // Un clic dit déjà quoi faire : pas de « répondre au client » par-dessus la suite proposée.
+  if(row.kind==='clic') d.lastHandledAt=new Date().toISOString();
   d.note=(d.note?d.note+' • ':'')+'Le '+fmtDate(today)+' : '+(row.kind==='clic'?(V19_CLIC[row.choix]||''):'réponse par mail')+(mot?' — '+mot.slice(0,140):'');
   refreshTemporalState(d);
   logEvent('messages','reply_received','Réponse reçue de '+d.client+' ('+(row.kind==='clic'?'un clic':'email')+') : '+resume,
@@ -6217,7 +6236,7 @@ async function v19ReleverEmails(){
       .eq('direction','in').is('applied_at',null).order('created_at',{ascending:true}).limit(50);
     if(q.error){ if(!/email_messages|relation|schema cache/i.test(q.error.message||'')) logError('relève des réponses',q.error); return; }
     var rows=q.data||[]; if(!rows.length) return;
-    var ids=[], resumes=[], appliquees=0, avant=cloudStateStamp;
+    var ids=[], resumes=[], appliquees=0, avant=cloudStateStamp, premier=null;
     rows.forEach(function(row){
       ids.push(row.id);
       if(messages.some(function(m){ return m.emailId===row.id; })) return; // déjà appliquée (sur cet appareil ou un autre)
@@ -6228,6 +6247,7 @@ async function v19ReleverEmails(){
         if(cl) d=deals.filter(function(x){ return x.clientId===cl.id; }).sort(function(a,b){ return isOpen(b)-isOpen(a); })[0]||null;
       }
       var rs=v19AppliquerReponse(row,d,t); appliquees++;
+      if(row.kind!=='auto'&&premier===null) premier=(d&&d.client)||t.client_name||row.from_email||'';
       if(rs) resumes.push(rs); else if(!d) resumes.push('Mail reçu de '+(t.client_name||row.from_email||'?'));
     });
     if(appliquees){
@@ -6239,7 +6259,7 @@ async function v19ReleverEmails(){
     var up=await supabaseClient.from('email_messages').update({applied_at:new Date().toISOString()}).in('id',ids);
     if(up.error) logError('réponses appliquées',up.error);
     renderAll();
-    if(resumes.length) v19Bandeau(resumes.length===1?resumes[0]+'.':resumes.length+' réponses de clients reçues : '+resumes.slice(0,2).join(', ')+(resumes.length>2?'…':'.'));
+    if(resumes.length){ v19Bandeau(resumes.length===1?resumes[0]+'.':resumes.length+' réponses de clients reçues : '+resumes.slice(0,2).join(', ')+(resumes.length>2?'…':'.'),resumes.length===1?(premier||''):''); v19Bip(); }
   }catch(err){ logError('relève des réponses',err); }
   finally{ V19_EMAIL.releve=false; }
 }
@@ -6254,7 +6274,140 @@ document.addEventListener('click',function(e){
 setInterval(function(){ if(document.visibilityState==='visible') v19ReleverEmails(); },90000);
 document.addEventListener('visibilitychange',function(){ if(document.visibilityState==='visible') setTimeout(v19ReleverEmails,800); });
 
+/* ===================== V19.2 — NOTIFICATIONS =====================
+   1) Dans MEMO : pastille sur « Messages » et sur le menu du téléphone, compteur dans l'onglet
+      du navigateur « (2) MEMO », petit son, bandeau « Voir » qui ouvre la conversation.
+      Une réponse reste « non lue » jusqu'à ce que l'artisan ouvre la conversation du client.
+   2) MEMO fermé : notification sur le téléphone ou l'ordinateur (Web Push), activée depuis
+      « Mon compte ». Sur iPhone, il faut d'abord ajouter MEMO à l'écran d'accueil (exigence d'Apple). */
+
+function v19NonLus(){ return messages.filter(function(m){ return m.nonLu; }); }
+function v19MajPastilles(){
+  var n=v19NonLus().length, txt=n>9?'9+':String(n);
+  [document.querySelector('#v19Side [data-tab="messages"]'),document.getElementById('v19Burger')].forEach(function(el){
+    if(!el) return;
+    var p=el.querySelector('.v19-pastille');
+    if(!n){ if(p) p.remove(); return; }
+    if(!p){ p=document.createElement('span'); p.className='v19-pastille'; p.setAttribute('aria-hidden','true'); el.appendChild(p); }
+    p.textContent=txt;
+  });
+  var bm=document.querySelector('#v19Side [data-tab="messages"]');
+  if(bm) bm.setAttribute('aria-label',n?'Messages, '+n+' réponse'+(n>1?'s':'')+' non lue'+(n>1?'s':''):'Messages');
+  var base=document.title.replace(/^\(\d+\+?\)\s*/,'');
+  document.title=n?'('+txt+') '+base:base;
+}
+function v19MarquerLu(client){
+  var change=false;
+  messages.forEach(function(m){ if(m.nonLu&&fold(m.client)===fold(client)){ delete m.nonLu; change=true; } });
+  if(change){ save(); v19MajPastilles(); }
+}
+function v19OuvrirConversation(client){
+  openTab('messages');
+  if(client){ selectedThreadClient=client; renderThreads(); }
+}
+/* Petit son discret : seulement après une première action de l'artisan (règle des navigateurs). */
+var v19Son=null;
+document.addEventListener('pointerdown',function(){
+  try{ var C=window.AudioContext||window.webkitAudioContext; if(C&&!v19Son) v19Son=new C(); if(v19Son&&v19Son.state==='suspended') v19Son.resume(); }catch(_){ }
+},{passive:true});
+function v19Bip(){
+  try{
+    if(!v19Son||v19Son.state!=='running') return;
+    var t=v19Son.currentTime, o=v19Son.createOscillator(), g=v19Son.createGain();
+    o.type='sine'; o.frequency.setValueAtTime(880,t); o.frequency.setValueAtTime(1320,t+0.09);
+    g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(0.06,t+0.02); g.gain.exponentialRampToValueAtTime(0.0001,t+0.32);
+    o.connect(g); g.connect(v19Son.destination); o.start(t); o.stop(t+0.35);
+  }catch(_){ }
+}
+
+/* ---------- MEMO fermé : notifications sur l'appareil ---------- */
+function v19PushPossible(){ return ('serviceWorker' in navigator)&&('PushManager' in window)&&('Notification' in window); }
+function v19EstIOS(){ return /iphone|ipad|ipod/i.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1); }
+function v19EstAppli(){ try{ return window.matchMedia('(display-mode: standalone)').matches||navigator.standalone===true; }catch(_){ return false; } }
+function v19NomAppareil(){
+  var u=navigator.userAgent;
+  var os=/iphone/i.test(u)?'iPhone':/ipad/i.test(u)?'iPad':/android/i.test(u)?'Android':/windows/i.test(u)?'Windows':/mac os/i.test(u)?'Mac':'Appareil';
+  var nav=/edg\//i.test(u)?'Edge':/firefox/i.test(u)?'Firefox':/chrome|crios/i.test(u)?'Chrome':/safari/i.test(u)?'Safari':'Navigateur';
+  return (v19EstAppli()?'Appli MEMO':nav)+' · '+os;
+}
+function v19B64urlVersOctets(s){ s=String(s).replace(/-/g,'+').replace(/_/g,'/'); while(s.length%4) s+='='; var b=atob(s), o=new Uint8Array(b.length); for(var i=0;i<b.length;i++) o[i]=b.charCodeAt(i); return o; }
+async function v19PushInscriptionSW(){
+  if(!v19PushPossible()||location.protocol!=='https:') return null;
+  try{ return await navigator.serviceWorker.register('/sw.js',{scope:'/'}); }catch(e){ logError('notifications (service worker)',e); return null; }
+}
+async function v19PushEtat(){
+  if(MODE_DEMO||!cloudUser||!supabaseClient) return 'compte';
+  if(!v19PushPossible()) return (v19EstIOS()&&!v19EstAppli())?'ios-ecran':'indispo';
+  if(location.protocol!=='https:') return 'indispo';
+  if(Notification.permission==='denied') return 'refuse';
+  try{ var reg=await navigator.serviceWorker.getRegistration('/'); var sub=reg&&await reg.pushManager.getSubscription(); return sub?'actif':'inactif'; }
+  catch(_){ return 'inactif'; }
+}
+async function v19PushActiver(){
+  try{
+    var perm=await Notification.requestPermission();
+    if(perm!=='granted'){ v19Info('Notifications refusées','Le téléphone ou le navigateur a refusé. Vous pourrez les autoriser plus tard dans les réglages du site.'); return v19RenderNotif(); }
+    var reg=await v19PushInscriptionSW(); if(!reg) throw new Error('Ce navigateur ne permet pas les notifications.');
+    await navigator.serviceWorker.ready;
+    var r=await supabaseClient.functions.invoke('notifications',{body:{action:'cle'}});
+    if(r.error||!r.data||!r.data.cle) throw new Error('Le service de notifications ne répond pas. Réessayez dans un instant.');
+    var sub=await reg.pushManager.getSubscription();
+    if(!sub) sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:v19B64urlVersOctets(r.data.cle)});
+    var j=sub.toJSON();
+    var q=await supabaseClient.rpc('push_abonner',{p_endpoint:j.endpoint,p_p256dh:j.keys.p256dh,p_auth:j.keys.auth,p_appareil:v19NomAppareil()});
+    if(q.error) throw new Error(/trop_appareils/.test(q.error.message||'')?'Vous avez déjà 10 appareils abonnés. Désactivez-en un d’abord.':'L’abonnement n’a pas été enregistré. Réessayez.');
+    logEvent('compte','push_on','Notifications activées sur '+v19NomAppareil(),null);
+    v19Bandeau('Notifications activées sur cet appareil.');
+  }catch(err){ logError('activation des notifications',err); v19Info('Notifications non activées',String((err&&err.message)||err)); }
+  v19RenderNotif();
+}
+async function v19PushDesactiver(){
+  try{
+    var reg=await navigator.serviceWorker.getRegistration('/'); var sub=reg&&await reg.pushManager.getSubscription();
+    if(sub){ var e=sub.endpoint; await sub.unsubscribe(); await supabaseClient.from('push_abonnements').delete().eq('endpoint',e); }
+    logEvent('compte','push_off','Notifications désactivées sur '+v19NomAppareil(),null);
+    v19Bandeau('Notifications désactivées sur cet appareil.');
+  }catch(err){ logError('désactivation des notifications',err); }
+  v19RenderNotif();
+}
+async function v19PushTester(){
+  var r=await supabaseClient.functions.invoke('notifications',{body:{action:'tester'}});
+  if(r.error||!r.data) return v19Info('Test impossible','Le service de notifications ne répond pas. Réessayez dans un instant.');
+  v19Bandeau(r.data.envoyes?'Notification de test envoyée : elle doit arriver dans quelques secondes.':'Aucun appareil n’a pu être joint. Désactivez puis réactivez les notifications.');
+}
+async function v19RenderNotif(){
+  var box=document.getElementById('v19NotifPanel'); if(!box) return;
+  var etat=await v19PushEtat(), t='', a='';
+  if(etat==='compte'){ t='Connectez-vous à votre compte pour recevoir une notification quand un client vous répond.'; }
+  else if(etat==='ios-ecran'){ t='Sur iPhone, Apple demande d’ajouter MEMO à l’écran d’accueil : touchez <b>Partager</b> puis <b>« Sur l’écran d’accueil »</b>, ouvrez MEMO depuis la nouvelle icône, puis revenez ici.'; }
+  else if(etat==='indispo'){ t='Ce navigateur ne permet pas les notifications. Les réponses de vos clients arrivent quand même dans votre boîte mail et dans MEMO.'; }
+  else if(etat==='refuse'){ t='Les notifications sont bloquées pour MEMO sur cet appareil. Autorisez-les dans les réglages du site (le cadenas à gauche de l’adresse), puis rechargez la page.'; }
+  else if(etat==='inactif'){ t='Recevez une notification sur cet appareil dès qu’un client répond, même MEMO fermé.'; a='<button class="btn primary" type="button" data-v19notif="on">Activer sur cet appareil</button>'; }
+  else { t='<b>Activées sur cet appareil.</b> Vous êtes prévenu dès qu’un client répond, même MEMO fermé.'; a='<button class="btn" type="button" data-v19notif="test">Envoyer une notification de test</button><button class="btn" type="button" data-v19notif="off">Désactiver</button>'; }
+  box.innerHTML='<h3>Notifications</h3><p class="muted" style="margin:6px 0 12px">'+t+'</p>'+(a?'<div class="actions">'+a+'</div>':'');
+}
+document.addEventListener('click',function(e){
+  var b=e.target&&e.target.closest&&e.target.closest('[data-v19notif]');
+  if(b){ var k=b.dataset.v19notif; b.disabled=true; (k==='on'?v19PushActiver():k==='off'?v19PushDesactiver():v19PushTester()).finally(function(){ b.disabled=false; }); return; }
+  var v=e.target&&e.target.closest&&e.target.closest('[data-v19voir]');
+  if(v){ var bb=document.getElementById('v19Bandeau'); if(bb) bb.hidden=true; v19OuvrirConversation(v.dataset.v19voir||''); return; }
+  if(e.target&&e.target.closest&&e.target.closest('[data-tab="account"]')) setTimeout(v19RenderNotif,50);
+});
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.addEventListener('message',function(e){
+    var d=e.data||{};
+    if(d.type==='memo-nouvelle-reponse') setTimeout(v19ReleverEmails,1500);
+    if(d.type==='memo-ouvrir'){ v19OuvrirConversation(''); setTimeout(v19ReleverEmails,500); }
+  });
+  if(window.Notification&&Notification.permission==='granted') v19PushInscriptionSW();
+}
+/* Ouvert depuis une notification : /?ouvrir=messages */
+if(/(?:^|&)ouvrir=messages(?:&|$)/.test(location.search.slice(1))){
+  setTimeout(function(){ try{ openTab('messages'); history.replaceState(null,'',location.pathname); }catch(_){ } },2500);
+}
+
 function renderAll(){
+    try{ v19MajPastilles(); var ta=document.getElementById('tab-account'); if(ta&&ta.classList.contains('active')) v19RenderNotif(); }catch(_){ }
     migrateData();
     refreshAllTemporal();
     const steps=[renderAgenda,renderTodayPriorities,renderAccueil,renderKPIs,renderTemporalDashboard,renderBoard,renderClients,renderFollowups,renderConnections,renderThreads,renderFinance,renderPerformanceDashboard,renderDocDealOptions,renderHistory,renderAssistantMemory,renderDataScientist,renderAccount];
