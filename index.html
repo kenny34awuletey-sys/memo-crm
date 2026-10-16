@@ -1509,6 +1509,12 @@ body .v19-acc-liste .mono{ white-space:nowrap; }
 
 body .v19-acc-montant{ display:block; }
 body .v19-acc-sous{ display:block; margin-top:2px; }
+
+/* --- V19.2 — ENVOI RÉEL DES MAILS ---------------------------------------- */
+#v19Bandeau{position:fixed;left:50%;bottom:calc(18px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:7000;max-width:calc(100vw - 32px);background:#0a1f1a;color:#e8f2ee;border:1px solid #2bf07c;padding:11px 16px;font:600 14px/1.4 system-ui,sans-serif;box-shadow:0 14px 30px -10px rgba(0,0,0,.5)}
+#v19Bandeau[hidden]{display:none}
+.v19-filet{border-left:3px solid #c98a00;background:rgba(201,138,0,.08);padding:10px 12px;margin-top:10px}
+.v19-filet p{margin:0 0 8px}
 </style>
 <style id="v19-demarrage">
 /* V19.1 — rien ne s'affiche tant que MEMO n'a pas décidé quoi montrer (connexion, démo ou CRM).
@@ -1973,7 +1979,8 @@ html.v19-boot #v19Chargement{ display:grid; position:fixed; inset:0; z-index:500
           <h3>Message préparé</h3>
           <div id="followupComposer" class="result-box">Choisissez une affaire pour préparer une relance contextualisée.</div>
           <div class="actions" style="margin-top:10px">
-            <button class="btn primary" id="copyFollowupBtn" disabled>Copier le message</button>
+            <button class="btn primary" id="v19EnvoyerRel" disabled>Envoyer par email</button>
+            <button class="btn" id="copyFollowupBtn" disabled>Copier le message</button>
             <button class="btn" id="markFollowupSentBtn" disabled>Marquer comme envoyé</button>
           </div>
         </div>
@@ -2954,6 +2961,7 @@ html.v19-boot #v19Chargement{ display:grid; position:fixed; inset:0; z-index:500
     cloudConflict=false;
     applyCloudState(data?.state||{});
     cloudLoading=false;
+    setTimeout(()=>{ try{ v19ReleverEmails(); }catch(_){ } },1500);
   }
 
   /* V18 : en V17, une sauvegarde demandée pendant une synchro en cours était IGNORÉE (perte de données).
@@ -3929,6 +3937,7 @@ function renderBoard(){
     v19Composer($('#followupComposer'),d,'rel');
     $('#copyFollowupBtn').disabled=false;
     $('#markFollowupSentBtn').disabled=false;
+    if($('#v19EnvoyerRel')) $('#v19EnvoyerRel').disabled=false;
     openTab('followups');
   }
 
@@ -5430,7 +5439,8 @@ function v19Composer(box,d,ctx){
     (m.canal==='Email'?'<div class="v19-comp-objet"><span>Objet</span>'+escapeHtml(m.objet)+'</div>':'')+
     '<textarea data-v19texte rows="'+(m.canal==='Email'?9:4)+'" aria-label="Texte du message">'+escapeHtml(m.corps)+'</textarea>'+
     (m.completer?'<div class="v19-comp-alerte">Complétez la partie entre crochets avant d’envoyer.</div>':'')+
-    (ctx==='msg'?'<div class="actions"><button class="btn" type="button" data-v19copier>Copier</button><button class="btn primary" type="button" data-v19envoye>Enregistrer comme envoyé</button></div>':'');
+    (ctx==='msg'?'<div class="actions">'+(m.canal==='Email'?'<button class="btn primary" type="button" data-v19envoyer>Envoyer par email</button>':'')+'<button class="btn" type="button" data-v19copier>Copier</button><button class="btn" type="button" data-v19envoye>Enregistrer comme envoyé</button></div>':'');
+  if(ctx==='rel'){ var be=document.getElementById('v19EnvoyerRel'); if(be) be.hidden=(m.canal!=='Email'); }
 }
 function v19EnregistrerEnvoi(d,msg,canal){
   var before={next:d.next,actionDate:d.actionDate,hold:d.hold}, today=isoToday();
@@ -6067,6 +6077,183 @@ document.addEventListener('click',function(e){
     var L=v19AccListe(), n=L.length; if(n<2) return; v19Acc.i=(v19Acc.i+(dx<0?1:-1)+n)%n; renderAccueil(); },{passive:true});
 })();
 
+/* ===================== V19.2 — ENVOI RÉEL DES MAILS (LOT 4, ROUTE A) =====================
+   1) L'artisan relit et clique « Envoyer par email ». La fonction serveur « envoyer-email » envoie
+      au nom de l'artisan (prenom.nom@devis.memopilot.fr). « Répondre » écrit à l'artisan ET à MEMO ;
+      le client peut aussi répondre en un clic depuis le mail.
+   2) Les réponses arrivent dans la table email_messages. MEMO les relit ici (v19ReleverEmails),
+      les applique à l'affaire, enregistre, puis seulement ensuite les coche (applied_at).
+      Le serveur n'écrit jamais dans crm_state : pas de conflit avec l'écriture conditionnelle (S10).
+   3) Filet de sécurité : avant une nouvelle relance par mail, MEMO demande si le client a répondu
+      autrement (téléphone, autre adresse). Un toucher suffit pour annuler la relance. */
+var V19_EMAIL={ enCours:false, releve:false, filetOui:false };
+var V19_CLIC={ signe:'Je signe', temps:'J’ai besoin d’un peu de temps', rappel:'Rappelez-moi', non:'Je ne donne pas suite' };
+
+function v19Bandeau(texte){
+  var b=document.getElementById('v19Bandeau'); if(!b) return;
+  b.textContent=texte; b.hidden=false;
+  clearTimeout(v19Bandeau.t); v19Bandeau.t=setTimeout(function(){ b.hidden=true; },7000);
+}
+function v19DernierMailSansReponse(d){
+  var lastOut=null, lastIn=null;
+  messages.forEach(function(m){
+    if(fold(m.client)!==fold(d.client)) return;
+    var t=m.iso||'';
+    if(m.direction==='out'&&m.channel==='Email'&&(!lastOut||t>(lastOut.iso||''))) lastOut=m;
+    if(m.direction==='in'&&!m.auto&&(!lastIn||t>(lastIn.iso||''))) lastIn=m;
+  });
+  if(!lastOut) return null;
+  if(lastIn&&(lastIn.iso||'')>(lastOut.iso||'')) return null;
+  return lastOut;
+}
+function v19Info(titre,texte){ return uiDialog({title:titre,message:texte,confirmLabel:'OK',cancelLabel:null}); }
+
+async function v19EnvoyerEmail(d,box){
+  if(V19_EMAIL.enCours||!d||!box) return;
+  if(v19CanalDe(box)!=='Email'){ v19Info('Envoi par mail seulement','MEMO envoie les mails. Pour un SMS ou un WhatsApp, copiez le message et envoyez-le depuis votre téléphone.'); return; }
+  if(MODE_DEMO){ v19Info('Démo : rien ne part','Dans la démo, aucun mail n’est envoyé. Avec votre compte, ce bouton envoie le message à votre client, à votre nom, et ses réponses reviennent ici.'); return; }
+  if(!cloudUser||!supabaseClient){ v19Info('Connectez-vous pour envoyer','L’envoi depuis MEMO demande un compte : c’est lui qui reçoit les réponses de vos clients. En attendant, copiez le message.'); return; }
+  var texte=v19TexteDe(box); if(!texte) return;
+  if(/\[[^\]]*compléter[^\]]*\]/i.test(texte)){ v19Info('Message incomplet','Le message contient encore une partie à compléter entre crochets.'); return; }
+
+  var c=clientOf(d)||null, adresse=normEmail((c&&c.email)||'');
+  if(!isEmail(adresse)){
+    var r0=await uiDialog({title:'Adresse email de '+d.client,message:'MEMO n’a pas encore son adresse. Elle sera enregistrée dans sa fiche.',
+      fields:[{id:'email',label:'Adresse email',type:'email',value:'',placeholder:'nom@exemple.fr'}],confirmLabel:'Continuer',
+      validate:function(v){ return isEmail(normEmail(v.email))?'':'Cette adresse ne semble pas valide.'; }});
+    if(!r0.ok) return;
+    adresse=normEmail(r0.values.email);
+    if(c){ c.email=adresse; c.updatedAt=new Date().toISOString(); save(); }
+  }
+
+  var m=v19Message(d), p=cloudProfile||{};
+  var exp=[[p.firstName,p.lastName].filter(Boolean).join(' '),p.company].filter(Boolean).join(' · ');
+  var sans=v19DernierMailSansReponse(d);
+  V19_EMAIL.filetOui=false;
+  var r=await uiDialog({title:'Envoyer à '+d.client+' ?',confirmLabel:'Envoyer',cancelLabel:'Annuler',html:
+    '<p><b>À :</b> '+escapeHtml(adresse)+'<br><b>Objet :</b> '+escapeHtml(m.objet)+'</p>'+
+    '<p>Le mail part à votre nom'+(exp?' (« '+escapeHtml(exp)+' »)':'')+'. Ses réponses arrivent dans votre boîte '+escapeHtml(cloudUser.email||'')+' et dans MEMO. Il pourra aussi répondre en un clic.</p>'+
+    (exp?'':'<p class="muted">Ajoutez votre nom et votre entreprise dans « Mon compte » : c’est ce que le client verra comme expéditeur.</p>')+
+    (sans?'<div class="v19-filet"><p><b>'+escapeHtml(d.client)+' vous a-t-il répondu par téléphone ou par un autre mail depuis le '+escapeHtml(fmtDate(String(sans.iso||'').slice(0,10)))+' ?</b></p><button type="button" class="btn small" data-v19filet>Oui, il m’a répondu</button></div>':'')});
+  if(V19_EMAIL.filetOui){ await v19NoterReponseAutre(d); return; }
+  if(!r.ok) return;
+
+  V19_EMAIL.enCours=true;
+  var btns=$$('[data-v19envoyer],#v19EnvoyerRel');
+  btns.forEach(function(b){ b.disabled=true; b.dataset.txt=b.textContent; b.textContent='Envoi…'; });
+  try{
+    var res=await supabaseClient.functions.invoke('envoyer-email',{body:{
+      deal_ref:d.id, client_name:d.client, client_email:adresse, subject:m.objet, text:texte,
+      cle:(Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,10))
+    }});
+    if(res.error){
+      var msgErr='Le mail n’est pas parti. Vérifiez votre connexion et réessayez.';
+      try{ var j=await res.error.context.json(); if(j&&j.message) msgErr=j.message; }catch(_){ }
+      throw new Error(msgErr);
+    }
+    v19EnregistrerEnvoi(d,texte,'Email');
+    delete v19Choix[d.id];
+    v19Bandeau('Mail envoyé à '+d.client+'. Ses réponses arriveront ici.');
+    if(box.id==='followupComposer'){
+      box.innerHTML='<strong>Mail envoyé à '+escapeHtml(d.client)+'.</strong><br><span class="muted">Sa réponse arrivera dans votre boîte et ici. S’il ne répond pas, MEMO vous proposera de le relancer le '+escapeHtml(fmtDate(d.actionDate))+'.</span>';
+      ['#markFollowupSentBtn','#copyFollowupBtn'].forEach(function(s){ var x=$(s); if(x) x.disabled=true; });
+    }else{ selectedThreadClient=d.client; renderThreadPane(d.client); }
+  }catch(err){
+    logError('envoi email',err);
+    v19Info('Mail non envoyé',String((err&&err.message)||err));
+  }finally{
+    V19_EMAIL.enCours=false;
+    btns.forEach(function(b){ if(b.dataset.txt){ b.textContent=b.dataset.txt; delete b.dataset.txt; } b.disabled=(b.id==='v19EnvoyerRel'&&box.id==='followupComposer'&&!box.querySelector('[data-v19texte]')); });
+  }
+}
+
+async function v19NoterReponseAutre(d){
+  var r=await uiDialog({title:'Qu’a répondu '+d.client+' ?',message:'MEMO annule la relance et note sa réponse.',
+    fields:[{id:'mot',label:'Sa réponse en quelques mots (facultatif)',value:'',placeholder:'Ex. : attend sa banque, rappeler lundi'}],
+    confirmLabel:'Noter',cancelLabel:'Annuler'});
+  if(!r.ok) return;
+  var mot=String(r.values.mot||'').trim(), today=isoToday();
+  var before={hold:d.hold,next:d.next,actionDate:d.actionDate};
+  addMessage(d.client,'Téléphone','in',mot||'Réponse du client (notée par vous)',d.clientId);
+  d.hold=''; d.next=mot?'Donner suite : '+mot.slice(0,80):'Donner suite à la réponse du client'; d.actionDate=today;
+  d.lastInteractionDate=today; d.updatedAt=new Date().toISOString();
+  d.note=(d.note?d.note+' • ':'')+'Le '+fmtDate(today)+' : réponse du client'+(mot?' — '+mot.slice(0,140):'');
+  refreshTemporalState(d);
+  logEvent('messages','reply_received','Réponse notée à la main : '+d.client+(mot?' — '+mot:''),{dealId:d.id,changes:diffFields(before,d,['hold','next','actionDate'])});
+  renderAll();
+  v19Bandeau('Relance annulée : réponse de '+d.client+' notée.');
+}
+
+function v19AppliquerReponse(row,d,t){
+  var today=isoToday(), mot=String(row.extrait||'').trim();
+  var nom=(d&&d.client)||t.client_name||row.from_email||'Client';
+  var texte=row.kind==='clic' ? 'Réponse en un clic : « '+(V19_CLIC[row.choix]||row.choix)+' »'+(mot?' — '+mot:'')
+    : row.kind==='auto' ? 'Réponse automatique : '+(mot||row.subject||'')
+    : (mot||row.subject||'(message vide)');
+  messages.push({id:uid('m'),client:nom,clientId:d?d.clientId:undefined,channel:'Email',direction:'in',
+    at:new Date(row.created_at).toLocaleString('fr-FR'),iso:row.created_at,text:texte,emailId:row.id,auto:row.kind==='auto'||undefined});
+  if(!d){ logEvent('messages','reply_unmatched','Mail reçu de '+nom+', sans affaire correspondante',null); return null; }
+  if(row.kind==='auto'){ logEvent('messages','auto_reply','Réponse automatique de '+d.client+' : la relance reste prévue',{dealId:d.id}); return null; }
+  var before={hold:d.hold,next:d.next,actionDate:d.actionDate,priority:d.priority}, resume;
+  if(row.kind==='clic'&&row.choix==='signe'){ d.hold=''; d.next='Faire signer le devis et fixer le démarrage'; d.actionDate=today; d.priority='Forte'; resume='veut signer'; }
+  else if(row.kind==='clic'&&row.choix==='temps'){ d.hold='En attente client'; d.next='Reprendre contact (le client a demandé du temps)'; d.actionDate=addDaysISO(today,7); resume='demande un peu de temps'; }
+  else if(row.kind==='clic'&&row.choix==='rappel'){ d.hold=''; d.next='Rappeler '+d.client+(mot?' ('+mot.slice(0,60)+')':''); d.actionDate=today; resume='demande à être rappelé'; }
+  else if(row.kind==='clic'&&row.choix==='non'){ d.hold=''; d.next='Clôturer l’affaire (le client ne donne pas suite)'; d.actionDate=today; resume='ne donne pas suite'; }
+  else { d.hold=''; d.next='Lire et répondre au mail du client'; d.actionDate=today; resume='a répondu par mail'; }
+  d.lastInteractionDate=today; d.updatedAt=new Date().toISOString();
+  d.note=(d.note?d.note+' • ':'')+'Le '+fmtDate(today)+' : '+(row.kind==='clic'?(V19_CLIC[row.choix]||''):'réponse par mail')+(mot?' — '+mot.slice(0,140):'');
+  refreshTemporalState(d);
+  logEvent('messages','reply_received','Réponse reçue de '+d.client+' ('+(row.kind==='clic'?'un clic':'email')+') : '+resume,
+    {dealId:d.id,changes:diffFields(before,d,['hold','next','actionDate','priority'])});
+  return d.client+' '+resume;
+}
+
+async function v19ReleverEmails(){
+  if(!cloudUser||!supabaseClient||MODE_DEMO||V19_EMAIL.releve||cloudLoading||cloudConflict) return;
+  V19_EMAIL.releve=true;
+  try{
+    var q=await supabaseClient.from('email_messages')
+      .select('id,kind,choix,from_email,subject,extrait,created_at,email_threads(deal_ref,client_name,client_email)')
+      .eq('direction','in').is('applied_at',null).order('created_at',{ascending:true}).limit(50);
+    if(q.error){ if(!/email_messages|relation|schema cache/i.test(q.error.message||'')) logError('relève des réponses',q.error); return; }
+    var rows=q.data||[]; if(!rows.length) return;
+    var ids=[], resumes=[], appliquees=0, avant=cloudStateStamp;
+    rows.forEach(function(row){
+      ids.push(row.id);
+      if(messages.some(function(m){ return m.emailId===row.id; })) return; // déjà appliquée (sur cet appareil ou un autre)
+      var t=row.email_threads||{};
+      var d=t.deal_ref?findDeal(t.deal_ref):null;
+      if(!d&&row.from_email){
+        var cl=clients.find(function(c){ return normEmail(c.email)===normEmail(row.from_email); });
+        if(cl) d=deals.filter(function(x){ return x.clientId===cl.id; }).sort(function(a,b){ return isOpen(b)-isOpen(a); })[0]||null;
+      }
+      var rs=v19AppliquerReponse(row,d,t); appliquees++;
+      if(rs) resumes.push(rs); else if(!d) resumes.push('Mail reçu de '+(t.client_name||row.from_email||'?'));
+    });
+    if(appliquees){
+      save();
+      await flushCloudSave();
+      // Pas enregistré dans le cloud (conflit, réseau) : on ne coche rien, la prochaine relève recommencera sans doublon.
+      if(cloudConflict||cloudStateStamp===avant) return;
+    }
+    var up=await supabaseClient.from('email_messages').update({applied_at:new Date().toISOString()}).in('id',ids);
+    if(up.error) logError('réponses appliquées',up.error);
+    renderAll();
+    if(resumes.length) v19Bandeau(resumes.length===1?resumes[0]+'.':resumes.length+' réponses de clients reçues : '+resumes.slice(0,2).join(', ')+(resumes.length>2?'…':'.'));
+  }catch(err){ logError('relève des réponses',err); }
+  finally{ V19_EMAIL.releve=false; }
+}
+
+document.addEventListener('click',function(e){
+  var t=e.target; if(!t||!t.closest) return;
+  if(t.closest('[data-v19filet]')){ e.preventDefault(); V19_EMAIL.filetOui=true; closeUiDialog(false); return; }
+  if(t.closest('#v19EnvoyerRel')){ var d1=selectedFollowupId&&findDeal(selectedFollowupId); if(d1) v19EnvoyerEmail(d1,$('#followupComposer')); return; }
+  var b=t.closest('[data-v19envoyer]'); if(!b) return;
+  var box=b.closest('.v19-composer'), d2=box&&findDeal(box.dataset.deal); if(d2) v19EnvoyerEmail(d2,box);
+});
+setInterval(function(){ if(document.visibilityState==='visible') v19ReleverEmails(); },90000);
+document.addEventListener('visibilitychange',function(){ if(document.visibilityState==='visible') setTimeout(v19ReleverEmails,800); });
+
 function renderAll(){
     migrateData();
     refreshAllTemporal();
@@ -6538,6 +6725,7 @@ function renderAll(){
     renderAll();
     $('#followupComposer').innerHTML=`<strong>Relance marquée comme envoyée.</strong><br><span class="muted">Dossier en attente de réponse ; nouvelle relance programmée le ${fmtDate(d.actionDate)} si le client ne répond pas.</span>`;
     $('#markFollowupSentBtn').disabled=true;
+    if($('#v19EnvoyerRel')) $('#v19EnvoyerRel').disabled=true;
   };
 
   /* ===================== IMPORT EXCEL / CSV (V18) =====================
@@ -7536,6 +7724,7 @@ function renderAll(){
     if($('#followupComposer')) $('#followupComposer').innerHTML='Choisissez une affaire pour préparer une relance contextualisée.';
     if($('#copyFollowupBtn')) $('#copyFollowupBtn').disabled=true;
     if($('#markFollowupSentBtn')) $('#markFollowupSentBtn').disabled=true;
+    if($('#v19EnvoyerRel')) $('#v19EnvoyerRel').disabled=true;
     $$('[data-auto-mode]').forEach(x=>x.classList.toggle('active',x.dataset.autoMode==='Manuel'));
     // La trace de remise à zéro est la première entrée du nouvel historique.
     logEvent('donnees','workspace_reset',`Espace remis à zéro (${counts.clients} client(s), ${counts.deals} affaire(s), ${counts.messages} message(s) supprimés)`,counts);
@@ -7746,7 +7935,8 @@ function renderAll(){
     setTimeout(leverVoile,8000); }
 })();
 </script>
-<div style="text-align:center;padding:14px 0 24px;color:#718077;font-size:10px">MEMO • V19.1</div>
+<div style="text-align:center;padding:14px 0 24px;color:#718077;font-size:10px">MEMO • V19.2</div>
+<div id="v19Bandeau" role="status" aria-live="polite" hidden></div>
 <script>
 setTimeout(()=>document.documentElement.classList.remove('v19-boot'),8000);
 document.addEventListener('DOMContentLoaded',()=>{
