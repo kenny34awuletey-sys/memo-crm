@@ -1,0 +1,53 @@
+#  MEMO — En-têtes de sécurité HTTP  (tâche S09 — note A sur securityheaders.com le 13/10/2026)
+#
+#  Pourquoi ce fichier et pas « _headers » :
+#  un « _headers » mal écrit est ignoré SANS AUCUN MESSAGE — c'est ce qui nous a
+#  fait perdre l'après-midi du 13/10. Les erreurs de ce fichier-ci apparaissent
+#  dans le journal de déploiement Netlify.
+#
+#  Ne pas avoir les deux fichiers à la racine en même temps.
+#  À vérifier après chaque mise en ligne : https://securityheaders.com
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    # Interdit l'affichage de MEMO dans un cadre sur un autre site
+    # (détournement de clic : un bouton invisible superposé au vôtre).
+    X-Frame-Options = "DENY"
+
+    # Empêche le navigateur de « deviner » le type d'un fichier servi.
+    X-Content-Type-Options = "nosniff"
+
+    # Ne transmet jamais l'adresse complète de la page aux sites tiers.
+    Referrer-Policy = "strict-origin-when-cross-origin"
+
+    # Impose HTTPS pendant 2 ans, sous-domaines compris.
+    # Irréversible pendant la durée annoncée : à ne garder qu'avec un certificat valide.
+    Strict-Transport-Security = "max-age=63072000; includeSubDomains"
+
+    # MEMO n'a besoin d'aucun capteur : on les refuse tous explicitement.
+    Permissions-Policy = "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+
+    # Isole MEMO des autres onglets ouverts.
+    Cross-Origin-Opener-Policy = "same-origin"
+    Cross-Origin-Resource-Policy = "same-origin"
+
+    # Politique de sécurité du contenu : seules ces origines sont autorisées.
+    #   'unsafe-inline' est nécessaire tant que le code vit dans la page ;
+    #   il disparaîtra quand le script sortira dans un fichier (lot 0).
+    #   REMPLACER fjfqigyxeejxztaivqui si on change de projet Supabase.
+    Content-Security-Policy = "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' https://fjfqigyxeejxztaivqui.supabase.co wss://fjfqigyxeejxztaivqui.supabase.co; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+
+# La page principale ne doit jamais être servie depuis un cache périmé : sinon une
+# correction peut mettre des jours à atteindre un utilisateur — ou ne jamais l'atteindre.
+# ATTENTION : un visiteur arrive sur « / », pas sur « /index.html ». Les deux règles
+# sont nécessaires. (Défaut constaté le 13/10 : le site restait affiché en V18.)
+[[headers]]
+  for = "/"
+  [headers.values]
+    Cache-Control = "no-cache"
+
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "no-cache"

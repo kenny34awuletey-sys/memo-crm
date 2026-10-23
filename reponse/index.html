@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<meta name="referrer" content="no-referrer">
+<title>Votre réponse</title>
+<style>
+/* Page « Répondre en un clic » : ouverte depuis le mail de l'artisan, sur téléphone le plus souvent.
+   Pas de compte, pas de cookie, pas de mesure d'audience. Rien n'est enregistré avant le bouton « Envoyer ». */
+:root{--bg:#f4f6f3;--carte:#fff;--encre:#13201c;--doux:#59665f;--ligne:#d6ddd8;--vert:#126b40;--vert-fond:#e3f3ea;--rouge:#a3301e;--f:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}
+@media (prefers-color-scheme:dark){:root{--bg:#0b1411;--carte:#13201c;--encre:#e7efeb;--doux:#9fb0a8;--ligne:#2a3b35;--vert:#5fe39a;--vert-fond:#123326;--rouge:#ff917c;color-scheme:dark}}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--encre);font-family:var(--f);font-size:17px;line-height:1.45}
+main{max-width:520px;margin:0 auto;padding:max(20px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) 40px max(16px,env(safe-area-inset-left))}
+.carte{background:var(--carte);border:1px solid var(--ligne);border-radius:2px;padding:20px 18px;display:grid;gap:16px}
+h1{font-size:22px;line-height:1.2;margin:0}
+p{margin:0}
+.doux{color:var(--doux);font-size:15px}
+fieldset{border:0;margin:0;padding:0;display:grid;gap:8px}
+legend{font-weight:600;margin-bottom:8px}
+label.choix{display:flex;gap:12px;align-items:center;border:1px solid var(--ligne);border-radius:2px;padding:14px;cursor:pointer;min-height:52px}
+label.choix input{width:22px;height:22px;accent-color:var(--vert);flex:none;margin:0}
+label.choix:has(input:checked){border-color:var(--vert);background:var(--vert-fond);font-weight:600}
+textarea{width:100%;min-height:84px;font:inherit;font-size:16px;padding:10px 12px;border:1px solid var(--ligne);border-radius:2px;background:transparent;color:inherit;resize:vertical}
+.champ{display:grid;gap:6px}
+button{font:inherit;font-weight:700;border:0;border-radius:2px;background:var(--vert);color:#fff;padding:15px 18px;min-height:52px;cursor:pointer;width:100%}
+@media (prefers-color-scheme:dark){button{color:#06140d}}
+button:disabled{opacity:.6;cursor:default}
+:focus-visible{outline:3px solid var(--vert);outline-offset:2px}
+.erreur{color:var(--rouge);font-size:15px}
+.pied{margin-top:16px;font-size:13px;color:var(--doux);text-align:center}
+</style>
+</head>
+<body>
+<main>
+  <div class="carte" id="carte" aria-live="polite">
+    <p class="doux" id="chargement">Un instant…</p>
+  </div>
+  <p class="pied">Page envoyée par votre artisan avec MEMO. Aucun compte, aucun cookie.</p>
+</main>
+<script>
+(function(){
+  'use strict';
+  // Préprod et production n'ont pas la même base : choisie selon l'adresse de la page.
+  var PREPROD = /^preprod--/.test(location.hostname) || location.hostname === 'localhost';
+  var BASE = PREPROD ? 'https://fqjixptnieabjkgrtspp.supabase.co' : 'https://fjfqigyxeejxztaivqui.supabase.co';
+  var CLE = PREPROD ? 'sb_publishable__K-l3gwMKu5h1QEaPiXkEA_Pv48JuM-' : 'sb_publishable_p1CeJNYZ6XeGmMJHFsLHcA_ntHolXaj';
+  var URL_FN = BASE + '/functions/v1/reponse-client';
+
+  var CHOIX = [
+    ['signe', 'Je signe', 'Un mot pour {a} ? (facultatif)'],
+    ['temps', "J'ai besoin d'un peu de temps", "Jusqu'à quand, à peu près ? (facultatif)"],
+    ['rappel', 'Rappelez-moi', 'Quand êtes-vous joignable ? Ex. : lundi après 18 h'],
+    ['non', 'Je ne donne pas suite', 'Une raison ? (facultatif, ça aide l\'artisan)']
+  ];
+  var carte = document.getElementById('carte');
+  var h = location.hash.replace(/^#/, '').split('.');
+  var jeton = h[0] || '', pre = h[1] || '';
+  var artisan = 'votre artisan';
+
+  function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+  function appel(corps){
+    return fetch(URL_FN, { method: 'POST', headers: { 'Content-Type': 'application/json', 'apikey': CLE }, body: JSON.stringify(corps) })
+      .then(function(r){ return r.json().catch(function(){ return {}; }).then(function(j){ j._statut = r.status; return j; }); });
+  }
+  function lienMort(){
+    carte.innerHTML = '<h1>Ce lien ne fonctionne plus</h1><p>Il a peut-être été copié en partie. Répondez simplement au mail, ou appelez directement votre artisan.</p>';
+  }
+  function libelle(k){ for (var i = 0; i < CHOIX.length; i++) if (CHOIX[i][0] === k) return CHOIX[i][1]; return ''; }
+
+  function formulaire(info){
+    artisan = info.artisan || artisan;
+    var deja = info.deja && info.deja.choix ? info.deja : null;
+    var choisi = CHOIX.some(function(c){ return c[0] === pre; }) ? pre : (deja ? deja.choix : '');
+    carte.innerHTML =
+      '<h1>Votre réponse à ' + esc(artisan) + '</h1>' +
+      (deja ? '<p class="doux">Vous avez déjà répondu « ' + esc(libelle(deja.choix)) + ' ». Vous pouvez changer d\'avis.</p>' : '') +
+      '<form id="f" novalidate>' +
+        '<fieldset><legend>Votre réponse</legend>' +
+          CHOIX.map(function(c){
+            return '<label class="choix"><input type="radio" name="choix" value="' + c[0] + '"' + (c[0] === choisi ? ' checked' : '') + '> ' + esc(c[1]) + '</label>';
+          }).join('') +
+        '</fieldset>' +
+        '<div class="champ" style="margin-top:16px"><label for="mot" id="motLabel"></label>' +
+        '<textarea id="mot" maxlength="500"></textarea></div>' +
+        '<p class="erreur" id="err" hidden></p>' +
+        '<div style="margin-top:16px"><button type="submit" id="go">Envoyer ma réponse</button></div>' +
+      '</form>';
+    var f = document.getElementById('f');
+    function majLabel(){
+      var c = f.querySelector('input[name=choix]:checked');
+      var t = CHOIX.filter(function(x){ return c && x[0] === c.value; })[0];
+      document.getElementById('motLabel').textContent = (t ? t[2] : 'Un mot pour {a} ? (facultatif)').replace('{a}', artisan);
+    }
+    majLabel();
+    f.addEventListener('change', majLabel);
+    f.addEventListener('submit', function(e){
+      e.preventDefault();
+      var c = f.querySelector('input[name=choix]:checked'), err = document.getElementById('err'), go = document.getElementById('go');
+      if (!c){ err.textContent = 'Choisissez une réponse.'; err.hidden = false; return; }
+      err.hidden = true; go.disabled = true; go.textContent = 'Envoi…';
+      appel({ action: 'repondre', jeton: jeton, choix: c.value, mot: document.getElementById('mot').value })
+        .then(function(r){
+          if (r.ok){
+            carte.innerHTML = '<h1>Merci, ' + esc(artisan) + ' est prévenu.</h1><p>Votre réponse : <strong>' + esc(libelle(c.value)) + '</strong>.</p><p class="doux">Vous pouvez fermer cette page.</p>';
+            return;
+          }
+          if (r._statut === 404) return lienMort();
+          err.textContent = r._statut === 429 ? 'Vous avez déjà répondu plusieurs fois. Réessayez dans une heure, ou répondez au mail.' : 'La réponse n\'est pas partie. Vérifiez votre connexion et réessayez.';
+          err.hidden = false; go.disabled = false; go.textContent = 'Envoyer ma réponse';
+        })
+        .catch(function(){ err.textContent = 'La réponse n\'est pas partie. Vérifiez votre connexion et réessayez.'; err.hidden = false; go.disabled = false; go.textContent = 'Envoyer ma réponse'; });
+    });
+  }
+
+  if (!/^[A-Za-z0-9_-]{32,64}$/.test(jeton)) { lienMort(); return; }
+  appel({ action: 'lire', jeton: jeton })
+    .then(function(r){ if (r._statut === 200 && r.artisan) formulaire(r); else if (r._statut === 404) lienMort(); else throw 0; })
+    .catch(function(){ carte.innerHTML = '<h1>Page momentanément indisponible</h1><p>Réessayez dans un instant, ou répondez simplement au mail.</p>'; });
+})();
+</script>
+</body>
+</html>
