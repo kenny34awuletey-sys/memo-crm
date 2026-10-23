@@ -1527,6 +1527,21 @@ body .v19-acc-sous{ display:block; margin-top:2px; }
 #v19Side [data-tab="messages"]{display:flex;align-items:center;gap:8px}
 .v19-filet{border-left:3px solid #c98a00;background:rgba(201,138,0,.08);padding:10px 12px;margin-top:10px}
 .v19-filet p{margin:0 0 8px}
+
+/* --- V19.3 — IA : lire les réponses ------------------------------------------ */
+.v19-ia{max-width:82%;margin:-2px 0 12px;padding:11px 13px;border:1px solid #c9d8cf;border-left:4px solid #5b4bd6;background:#f7f6ff;font-size:13px;line-height:1.45}
+.v19-ia p{margin:6px 0}
+.v19-ia-tete{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.v19-ia-tag{display:inline-block;padding:2px 7px;background:#5b4bd6;color:#fff;font:700 10.5px/1.4 system-ui,sans-serif;letter-spacing:.02em;border-radius:2px;white-space:nowrap}
+.v19-ia-resume{font-size:14px;font-weight:600;color:#0b1714}
+.v19-ia-src{color:#55645f;font-style:italic}
+.v19-ia-faits{margin:6px 0;padding-left:18px}
+.v19-ia-suite{padding-top:6px;border-top:1px dashed #c9c3f0}
+.v19-ia .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.v19-ia-note{font-size:11px;color:#6b7570}
+.v19-ia-fait{padding:6px 10px;font-size:11.5px;color:#55645f;background:transparent;border-left-color:#c9c3f0}
+.v19-ia-brouillon{font-size:12px;color:#3d348f}
+@media (max-width:640px){ .v19-ia{max-width:100%} .v19-ia .actions .btn{flex:1 1 auto} }
 </style>
 <style id="v19-demarrage">
 /* V19.1 — rien ne s'affiche tant que MEMO n'a pas décidé quoi montrer (connexion, démo ou CRM).
@@ -2891,6 +2906,15 @@ html.v19-boot #v19Chargement{ display:grid; position:fixed; inset:0; z-index:500
     if(!supabaseClient||!cloudUser) return;
     try{ await supabaseClient.rpc('ensure_profile'); }
     catch(err){ console.error('MEMO ensure_profile',err); logError('fiche profil (réparation)',err); }
+    /* V19.4 : si le jeton contient encore nom, téléphone ou entreprise (compte créé avant le correctif),
+       ensure_profile vient de les ranger dans la fiche et de les effacer ; on demande tout de suite un jeton propre. */
+    try{
+      var m=(cloudUser&&cloudUser.user_metadata)||{};
+      if(['first_name','last_name','company','phone','role'].some(function(k){ return k in m; })){
+        var r=await supabaseClient.auth.refreshSession();
+        if(r&&r.data&&r.data.user) cloudUser=r.data.user;
+      }
+    }catch(err){ logError('jeton de connexion (nettoyage)',err); }
   }
 
   async function loadCloudProfile(){
@@ -4001,7 +4025,7 @@ function renderBoard(){
       <div style="margin-top:14px">${ms.map(m=>`<div class="bubble ${m.direction}">
         <span class="channel-pill">${escapeHtml(m.channel)}</span><br>${escapeHtml(m.text)}
         <div class="muted" style="font-size:9px;margin-top:5px">${escapeHtml(m.at)}</div>
-      </div>`).join('')}</div>
+      </div>${v19CarteIA(m,d)}`).join('')}</div>
       ${d?`<div class="notice" style="margin-top:14px"><strong>MEMO retient :</strong> ${escapeHtml(d.note||'aucune note')}<br><strong>Prochaine action :</strong> ${escapeHtml(d.next||'à définir')}</div>`:''}
       ${d?`<div class="v19-composer v19-comp-msg" id="v19CompMsg"></div>`:''}
     `;
@@ -4727,7 +4751,10 @@ function renderBoard(){
     if(!supabaseClient){ accountError(CLOUD_OFF_MSG); return; }
     const {data,error}=await supabaseClient.auth.signUp({
       email,password,
-      options:{data:{first_name:profile.firstName,last_name:profile.lastName,company:profile.company}}
+      /* V19.4 (audit du 23/10) : ces informations servent seulement à remplir la fiche profil quand le compte
+         doit d'abord être confirmé par mail. Le serveur les range dans « profiles » et les efface des
+         métadonnées dès la création du compte : elles ne voyagent pas dans le jeton de connexion. */
+      options:{data:{first_name:profile.firstName,last_name:profile.lastName,company:profile.company,phone:profile.phone,role:profile.role}}
     });
     if(error){ accountError(messageCompte(error.message)); return; }
     if(!data.session){
@@ -4742,6 +4769,7 @@ function renderBoard(){
     localStorage.setItem('memoGuestModeV17','0');
     saveUsers();
     await saveCloudProfile(profile);
+    await ensureProfileRow(); /* V19.4 : jeton sans données personnelles */
     applyCloudState({});
     await persistCloudState();
     hideAccountGate();
@@ -6203,11 +6231,12 @@ async function v19NoterReponseAutre(d){
 function v19AppliquerReponse(row,d,t){
   var today=isoToday(), mot=String(row.extrait||'').trim();
   var nom=(d&&d.client)||t.client_name||row.from_email||'Client';
+  var iaL=row.kind==='email'?v19IaPropre(row.ia):null;
   var texte=row.kind==='clic' ? 'Réponse en un clic : « '+(V19_CLIC[row.choix]||row.choix)+' »'+(mot?' — '+mot:'')
     : row.kind==='auto' ? 'Réponse automatique : '+(mot||row.subject||'')
     : (mot||row.subject||'(message vide)');
   messages.push({id:uid('m'),client:nom,clientId:d?d.clientId:undefined,channel:'Email',direction:'in',
-    at:new Date(row.created_at).toLocaleString('fr-FR'),iso:row.created_at,text:texte,emailId:row.id,auto:row.kind==='auto'||undefined,nonLu:row.kind==='auto'?undefined:true});
+    at:new Date(row.created_at).toLocaleString('fr-FR'),iso:row.created_at,text:texte,emailId:row.id,auto:row.kind==='auto'||undefined,nonLu:row.kind==='auto'?undefined:true,ia:iaL||undefined});
   if(!d){ logEvent('messages','reply_unmatched','Mail reçu de '+nom+', sans affaire correspondante',null); return null; }
   if(row.kind==='auto'){ logEvent('messages','auto_reply','Réponse automatique de '+d.client+' : la relance reste prévue',{dealId:d.id}); return null; }
   var before={hold:d.hold,next:d.next,actionDate:d.actionDate,priority:d.priority}, resume;
@@ -6215,7 +6244,8 @@ function v19AppliquerReponse(row,d,t){
   else if(row.kind==='clic'&&row.choix==='temps'){ d.hold='En attente client'; d.next='Reprendre contact (le client a demandé du temps)'; d.actionDate=addDaysISO(today,7); resume='demande un peu de temps'; }
   else if(row.kind==='clic'&&row.choix==='rappel'){ d.hold=''; d.next='Rappeler '+d.client+(mot?' ('+mot.slice(0,60)+')':''); d.actionDate=today; resume='demande à être rappelé'; }
   else if(row.kind==='clic'&&row.choix==='non'){ d.hold=''; d.next='Clôturer l’affaire (le client ne donne pas suite)'; d.actionDate=today; resume='ne donne pas suite'; }
-  else { d.hold=''; d.next='Lire et répondre au mail du client'; d.actionDate=today; resume='a répondu par mail'; }
+  else { d.hold=''; d.next=iaL?'Lire la réponse et valider la suite proposée':'Lire et répondre au mail du client'; d.actionDate=today;
+    resume=iaL?'a répondu : '+iaL.resume.charAt(0).toLowerCase()+iaL.resume.slice(1)+' (résumé IA)':'a répondu par mail'; }
   d.lastInteractionDate=today; d.updatedAt=new Date().toISOString();
   // Un clic dit déjà quoi faire : pas de « répondre au client » par-dessus la suite proposée.
   if(row.kind==='clic') d.lastHandledAt=new Date().toISOString();
@@ -6231,7 +6261,7 @@ async function v19ReleverEmails(){
   V19_EMAIL.releve=true;
   try{
     var q=await supabaseClient.from('email_messages')
-      .select('id,kind,choix,from_email,subject,extrait,created_at,email_threads(deal_ref,client_name,client_email)')
+      .select('id,kind,choix,from_email,subject,extrait,ia,created_at,email_threads(deal_ref,client_name,client_email)')
       .eq('direction','in').is('applied_at',null).order('created_at',{ascending:true}).limit(50);
     if(q.error){ if(!/email_messages|relation|schema cache/i.test(q.error.message||'')) logError('relève des réponses',q.error); return; }
     var rows=q.data||[]; if(!rows.length) return;
@@ -6411,6 +6441,101 @@ if('serviceWorker' in navigator){
 if(/(?:^|&)ouvrir=messages(?:&|$)/.test(location.search.slice(1))){
   setTimeout(function(){ try{ openTab('messages'); history.replaceState(null,'',location.pathname); }catch(_){ } },2500);
 }
+/* ===================== V19.3 — IA V1, FONCTION 1 : LIRE LES RÉPONSES =====================
+   Le serveur a fait lire la réponse du client par l'IA (fonction recevoir-email). MEMO l'affiche
+   comme une PROPOSITION : « Proposé par l'IA », avec le passage du mail d'où elle vient.
+   La suite proposée est calculée ici par les règles de MEMO à partir de l'intention lue ;
+   rien ne change dans l'affaire tant que l'artisan n'a pas touché « Appliquer ». */
+var V19_IA_INTENTIONS={ signe:'Veut signer', accord:'D’accord, veut avancer', reflechit:'Réfléchit encore',
+  attend:'Attend quelque chose', rappel:'Demande à être rappelé', prix:'Discute le prix', question:'Pose une question',
+  refus:'Ne donne pas suite', autre:'À lire' };
+
+/* Ce qui vient du serveur est revérifié avant d'entrer dans les données de l'artisan. */
+function v19IaPropre(ia){
+  if(!ia||typeof ia!=='object') return null;
+  var s=function(v,n){ return typeof v==='string'?v.replace(/\s+/g,' ').trim().slice(0,n):''; };
+  var o={ intention:Object.prototype.hasOwnProperty.call(V19_IA_INTENTIONS,ia.intention)?ia.intention:'autre',
+    resume:s(ia.resume,140), citation:s(ia.citation,200)||null,
+    date:(typeof ia.date_promise==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(ia.date_promise)&&ia.date_promise>=isoToday()&&ia.date_promise<=addDaysISO(isoToday(),366))?ia.date_promise:null,
+    objection:s(ia.objection,100)||null,
+    brouillon:typeof ia.brouillon==='string'?ia.brouillon.replace(/\r\n?/g,'\n').trim().slice(0,900):'',
+    etat:'propose' };
+  return o.resume?o:null;
+}
+
+/* Les règles de MEMO : intention lue → suite proposée. */
+function v19SuiteIA(ia,d){
+  var today=isoToday(), date=ia.date&&ia.date>=today?ia.date:null, quand=function(n){ return date||addDaysISO(today,n); };
+  var r={hold:'',actionDate:today,priority:d.priority};
+  switch(ia.intention){
+    case 'signe': r.next='Faire signer le devis et fixer le démarrage'; r.priority='Forte'; break;
+    case 'accord': r.next='Envoyer le devis à signer et proposer une date de démarrage'; r.priority='Forte'; break;
+    case 'reflechit': r.hold='En attente client'; r.next='Reprendre contact (le client réfléchit)'; r.actionDate=quand(7); break;
+    case 'attend': r.hold='En attente client'; r.next='Reprendre contact'+(ia.objection?' : '+ia.objection:''); r.actionDate=quand(7); break;
+    case 'rappel': r.next='Rappeler '+d.client; r.actionDate=quand(0); break;
+    case 'prix': r.next='Répondre sur le prix'+(ia.objection?' ('+ia.objection+')':''); r.priority='Forte'; break;
+    case 'question': r.next='Répondre à la question du client'; break;
+    case 'refus': r.next='Clôturer l’affaire (le client ne donne pas suite)'; break;
+    default: r.next='Lire et répondre au mail du client';
+  }
+  return r;
+}
+
+function v19DateLongue(iso){
+  try{ return new Date(iso+'T12:00:00').toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long'}); }catch(_){ return iso; }
+}
+
+function v19CarteIA(m,d){
+  var ia=m&&m.ia; if(!ia||m.direction!=='in') return '';
+  if(ia.etat!=='propose') return '<div class="v19-ia v19-ia-fait"><span class="v19-ia-tag">IA</span> '+
+    (ia.etat==='applique'?'Suite proposée appliquée':'Proposition ignorée')+(ia.le?' le '+escapeHtml(fmtDate(ia.le)):'')+'.</div>';
+  var s=d?v19SuiteIA(ia,d):null;
+  return '<div class="v19-ia" data-v19ia="'+escapeHtml(m.id)+'">'+
+    '<div class="v19-ia-tete"><span class="v19-ia-tag">Proposé par l’IA</span><b>'+escapeHtml(V19_IA_INTENTIONS[ia.intention])+'</b></div>'+
+    '<p class="v19-ia-resume">'+escapeHtml(ia.resume)+'</p>'+
+    (ia.citation?'<p class="v19-ia-src">D’après son message : « '+escapeHtml(ia.citation)+' »</p>':'')+
+    ((ia.date||ia.objection)?'<ul class="v19-ia-faits">'+(ia.date?'<li>Date donnée : <b>'+escapeHtml(v19DateLongue(ia.date))+'</b></li>':'')+(ia.objection?'<li>Frein : <b>'+escapeHtml(ia.objection)+'</b></li>':'')+'</ul>':'')+
+    (s?'<p class="v19-ia-suite">Suite proposée : <b>'+escapeHtml(s.next)+'</b> — '+(s.actionDate===isoToday()?'aujourd’hui':'le '+escapeHtml(fmtDate(s.actionDate)))+(s.hold?' · '+escapeHtml(s.hold):'')+'</p>':'')+
+    '<div class="actions">'+(s?'<button class="btn primary small" type="button" data-v19ia-act="appliquer">Appliquer</button>':'')+
+      (ia.brouillon&&d?'<button class="btn small" type="button" data-v19ia-act="brouillon">Utiliser le brouillon</button>':'')+
+      '<button class="btn small" type="button" data-v19ia-act="ignorer">Ignorer</button></div>'+
+    '<p class="v19-ia-note">L’IA peut se tromper : vérifiez avant d’appliquer. Rien ne change sans votre accord.</p>'+
+  '</div>';
+}
+
+function v19IaAppliquer(m,d){
+  var s=v19SuiteIA(m.ia,d), before={hold:d.hold,next:d.next,actionDate:d.actionDate,priority:d.priority};
+  d.hold=s.hold; d.next=s.next; d.actionDate=s.actionDate; d.priority=s.priority;
+  d.lastHandledAt=new Date().toISOString(); d.updatedAt=d.lastHandledAt;
+  d.note=(d.note?d.note+' • ':'')+'Le '+fmtDate(isoToday())+' : '+m.ia.resume+(m.ia.date?' (date donnée : '+fmtDate(m.ia.date)+')':'');
+  refreshTemporalState(d);
+  m.ia.etat='applique'; m.ia.le=isoToday();
+  logEvent('messages','ia_suite_appliquee','Suite proposée par l’IA appliquée : '+d.client+' — '+s.next,{dealId:d.id,changes:diffFields(before,d,['hold','next','actionDate','priority'])});
+  save(); renderAll();
+  v19Bandeau('C’est noté : '+s.next+(s.actionDate!==isoToday()?' le '+fmtDate(s.actionDate):'')+'.');
+}
+
+function v19IaBrouillon(m,d){
+  var box=document.getElementById('v19CompMsg'); if(!box) return;
+  var v=v19Vars(d), corps=String(m.ia.brouillon||'').replace(/^\s*(bonjour|madame|monsieur)[^\n]*\n+/i,'').replace(/\n+\s*(bien cordialement|cordialement|bonne journée)[\s\S]*$/i,'').trim();
+  var ta=box.querySelector('[data-v19texte]'); if(!ta) return;
+  ta.value='Bonjour '+v.nom+',\n\n'+corps+'\n\nBien cordialement,'+(v.sign?'\n'+v.sign:'');
+  var n=box.querySelector('.v19-ia-brouillon'); if(!n){ n=document.createElement('div'); n.className='v19-ia-brouillon'; ta.insertAdjacentElement('afterend',n); }
+  n.innerHTML='<span class="v19-ia-tag">Proposé par l’IA</span> Brouillon écrit par l’IA : relisez et corrigez avant d’envoyer.';
+  logEvent('messages','ia_brouillon','Brouillon de l’IA utilisé : '+d.client,{dealId:d.id});
+  ta.focus(); try{ ta.setSelectionRange(0,0); ta.scrollIntoView({block:'center',behavior:'smooth'}); }catch(_){ }
+}
+
+document.addEventListener('click',function(e){
+  var b=e.target&&e.target.closest&&e.target.closest('[data-v19ia-act]'); if(!b) return;
+  var carte=b.closest('[data-v19ia]'), id=carte&&carte.dataset.v19ia;
+  var m=messages.find(function(x){ return x.id===id; }); if(!m||!m.ia) return;
+  var d=deals.filter(function(x){ return fold(x.client)===fold(m.client); }).sort(function(a,c){ return isOpen(c)-isOpen(a); })[0];
+  var act=b.dataset.v19iaAct;
+  if(act==='appliquer'&&d) return v19IaAppliquer(m,d);
+  if(act==='brouillon'&&d) return v19IaBrouillon(m,d);
+  if(act==='ignorer'){ m.ia.etat='ignore'; m.ia.le=isoToday(); logEvent('messages','ia_ignoree','Proposition de l’IA ignorée : '+m.client,d?{dealId:d.id}:null); save(); renderAll(); }
+});
 
 function renderAll(){
     try{ v19MajPastilles(); var ta=document.getElementById('tab-account'); if(ta&&ta.classList.contains('active')) v19RenderNotif(); }catch(_){ }
@@ -8094,7 +8219,7 @@ function renderAll(){
     setTimeout(leverVoile,8000); }
 })();
 </script>
-<div style="text-align:center;padding:14px 0 24px;color:#718077;font-size:10px">MEMO • V19.2</div>
+<div style="text-align:center;padding:14px 0 24px;color:#718077;font-size:10px">MEMO • V19.4</div>
 <div id="v19Bandeau" role="status" aria-live="polite" hidden></div>
 <script>
 setTimeout(()=>document.documentElement.classList.remove('v19-boot'),8000);
