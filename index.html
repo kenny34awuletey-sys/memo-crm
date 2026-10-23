@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>[PRÉPROD] MEMO</title>
+<title>MEMO — votre suivi de devis</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="#0a1f1a">
 <link rel="icon" href="/icone-192.png" sizes="192x192">
@@ -1578,7 +1578,6 @@ html.v19-boot #v19Chargement{ display:grid; position:fixed; inset:0; z-index:500
 <script>document.documentElement.classList.add('v19-boot');</script>
 </head>
 <body>
-<div style="position:fixed;top:0;left:50%;transform:translateX(-50%);z-index:6000;background:#bd8300;color:#1d1400;font:700 11px/1 system-ui,sans-serif;letter-spacing:.12em;padding:5px 12px;pointer-events:none">PRÉPROD — BASE DE TEST</div>
 <div id="v19Chargement" aria-label="Chargement de MEMO" role="status"><svg viewBox="0 0 64 64" aria-hidden="true"><path d="M11 50V24l13 17 13-17v26" fill="none" stroke="#fff" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"/><rect x="31" y="7" width="12" height="12" fill="#2bf07c"/></svg></div>
 
 <div id="accountGate" class="account-gate hidden">
@@ -2845,8 +2844,8 @@ html.v19-boot #v19Chargement{ display:grid; position:fixed; inset:0; z-index:500
      Lu ici, avant le chargement du SDK, qui réécrit l'adresse. */
   const MODE_DEMO=/(?:^|&)demo=1(?:&|$)/.test(location.search.slice(1))||location.hash==='#demo';
 
-  const SUPABASE_URL='https://fqjixptnieabjkgrtspp.supabase.co';   /* PRÉPROD — ne pas déployer ce fichier en production */
-  const SUPABASE_PUBLISHABLE_KEY='sb_publishable__K-l3gwMKu5h1QEaPiXkEA_Pv48JuM-';
+  const SUPABASE_URL='https://fjfqigyxeejxztaivqui.supabase.co';
+  const SUPABASE_PUBLISHABLE_KEY='sb_publishable_p1CeJNYZ6XeGmMJHFsLHcA_ntHolXaj';
   /* V18.2 — le SDK Supabase est chargé depuis un CDN. S'il est injoignable (réseau d'entreprise,
      panne du CDN, poste hors ligne), la V18.1 s'arrêtait ici sur une page blanche, sans message.
      Désormais l'application démarre quand même : les fonctions de compte sont désactivées avec
