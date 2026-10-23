@@ -1542,6 +1542,27 @@ body .v19-acc-sous{ display:block; margin-top:2px; }
 .v19-ia-fait{padding:6px 10px;font-size:11.5px;color:#55645f;background:transparent;border-left-color:#c9c3f0}
 .v19-ia-brouillon{font-size:12px;color:#3d348f}
 @media (max-width:640px){ .v19-ia{max-width:100%} .v19-ia .actions .btn{flex:1 1 auto} }
+
+/* --- V19.5 — DÉMO : invitation au pilote, après quelques minutes ----------- */
+.v19-invit{position:fixed;right:calc(18px + env(safe-area-inset-right,0px));bottom:calc(18px + env(safe-area-inset-bottom,0px));z-index:7500;width:min(380px,calc(100vw - 32px));background:#0a1f1a;color:#e8f2ee;border:1px solid #2bf07c;padding:18px 18px 16px;box-shadow:0 24px 50px -16px rgba(0,0,0,.55);font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;animation:v19InvitArrive .45s cubic-bezier(.2,.7,.2,1)}
+.v19-invit[hidden]{display:none}
+@keyframes v19InvitArrive{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.v19-invit{animation:none}}
+.v19-invit h3{margin:0 28px 6px 0;font-size:19px;color:#fff}
+.v19-invit p{margin:0 0 12px;color:#c9dbd2}
+.v19-invit label{display:grid;gap:5px;margin-bottom:10px;font-size:13px;color:#d8e4de}
+.v19-invit input[type=email],.v19-invit input[type=text]{font:15px/1.3 inherit;font-family:inherit;color:#fff;background:#03140e;border:1px solid #2c4a3f;border-radius:0;padding:10px 11px;min-height:44px;width:100%;box-sizing:border-box}
+.v19-invit input:focus-visible,.v19-invit button:focus-visible{outline:2px solid #2bf07c;outline-offset:1px}
+.v19-invit-btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}
+.v19-invit .v19-invit-ok{background:#2bf07c;color:#03140e;border:0;font:700 14px/1 inherit;font-family:inherit;padding:12px 16px;cursor:pointer;border-radius:0}
+.v19-invit .v19-invit-tard{background:transparent;color:#e8f2ee;border:1px solid #2c4a3f;font:600 14px/1 inherit;font-family:inherit;padding:12px 14px;cursor:pointer;border-radius:0}
+.v19-invit-x{position:absolute;top:8px;right:8px;width:34px;height:34px;background:transparent;border:0;color:#c9dbd2;font-size:22px;line-height:1;cursor:pointer}
+.v19-invit-rgpd{font-size:11.5px!important;color:#9fb5ab!important;margin:12px 0 0!important}
+.v19-invit-rgpd a{color:#e8f2ee}
+.v19-invit-etat{margin:10px 0 0!important;font-weight:600;color:#e8f2ee!important}
+.v19-invit-etat.ok{color:#2bf07c!important}.v19-invit-etat.ko{color:#ffb4a8!important}
+.v19-invit .hp{position:absolute!important;left:-9999px!important;width:1px;height:1px;overflow:hidden}
+@media (max-width:560px){.v19-invit{left:calc(12px + env(safe-area-inset-left,0px));right:calc(12px + env(safe-area-inset-right,0px));width:auto;bottom:calc(12px + env(safe-area-inset-bottom,0px))}}
 </style>
 <style id="v19-demarrage">
 /* V19.1 — rien ne s'affiche tant que MEMO n'a pas décidé quoi montrer (connexion, démo ou CRM).
@@ -6537,6 +6558,59 @@ document.addEventListener('click',function(e){
   if(act==='ignorer'){ m.ia.etat='ignore'; m.ia.le=isoToday(); logEvent('messages','ia_ignoree','Proposition de l’IA ignorée : '+m.client,d?{dealId:d.id}:null); save(); renderAll(); }
 });
 
+/* ===================== V19.5 — DÉMO : INVITATION AU PILOTE =====================
+   Démo libre ; au bout de 2 min 30 (ou après 6 actions, mais jamais avant 45 s), une invitation discrète
+   propose de recevoir l'accès au pilote par mail. Une seule fois par visite, jamais pendant une fenêtre
+   ou la visite guidée. Rien n'est stocké dans le navigateur (règle de la démo). */
+var V19_INVIT={debut:0,actions:0,montre:false,fini:false,minuterie:null};
+function v19InvitPret(){
+  if(V19_INVIT.montre||V19_INVIT.fini) return false;
+  var d=document.getElementById('uiDialog'), t=document.getElementById('tourLayer');
+  if(d&&!d.classList.contains('hidden')) return false;
+  if(t&&!t.classList.contains('hidden')) return false;
+  var ecoule=Date.now()-V19_INVIT.debut;
+  return ecoule>=150000||(V19_INVIT.actions>=6&&ecoule>=45000);
+}
+function v19InvitMontrer(){
+  var a=document.getElementById('v19Invit'); if(!a) return;
+  V19_INVIT.montre=true; a.hidden=false;
+  clearInterval(V19_INVIT.minuterie);
+  try{ logEvent('demo','invitation','Invitation au pilote affichée',null); }catch(_){ }
+}
+function v19InvitFermer(){ var a=document.getElementById('v19Invit'); if(a) a.hidden=true; V19_INVIT.fini=true; }
+function v19InviterPilote(){
+  if(!MODE_DEMO) return;
+  V19_INVIT.debut=Date.now();
+  V19_INVIT.minuterie=setInterval(function(){ if(v19InvitPret()) v19InvitMontrer(); },3000);
+}
+document.addEventListener('click',function(e){
+  if(!MODE_DEMO) return;
+  var t=e.target; if(!t||!t.closest) return;
+  var b=t.closest('[data-v19invit]');
+  if(b){ v19InvitFermer(); return; }
+  if(!t.closest('#v19Invit')&&t.closest('button,[data-act],a,.thread,[role=button]')) V19_INVIT.actions++;
+},true);
+document.addEventListener('keydown',function(e){ if(e.key==='Escape'){ var a=document.getElementById('v19Invit'); if(a&&!a.hidden) v19InvitFermer(); } });
+(function(){
+  document.addEventListener('submit',function(e){
+    var f=e.target; if(!f||f.id!=='v19InvitForm') return;
+    e.preventDefault();
+    var etat=document.getElementById('v19InvitEtat'), bouton=document.getElementById('v19InvitEnvoyer');
+    if(!f.reportValidity()) return;
+    etat.className='v19-invit-etat';
+    if(location.protocol==='file:'){ etat.textContent='L’envoi fonctionnera une fois MEMO en ligne.'; return; }
+    bouton.disabled=true; etat.textContent='Envoi en cours…';
+    fetch('/',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(new FormData(f)).toString()})
+      .then(function(r){ if(!r.ok) throw new Error(String(r.status));
+        etat.className='v19-invit-etat ok'; etat.textContent='C’est noté : vous recevrez votre accès au pilote par mail.';
+        f.querySelectorAll('input[type=email],input[type=text]').forEach(function(x){ x.value=''; });
+        try{ logEvent('demo','invitation_ok','Demande d’accès au pilote envoyée',null); }catch(_){ }
+        setTimeout(v19InvitFermer,5000); })
+      .catch(function(){ etat.className='v19-invit-etat ko'; etat.textContent='L’envoi n’a pas abouti. Vérifiez votre connexion et réessayez.'; })
+      .then(function(){ bouton.disabled=false; });
+  });
+})();
+
 function renderAll(){
     try{ v19MajPastilles(); var ta=document.getElementById('tab-account'); if(ta&&ta.classList.contains('active')) v19RenderNotif(); }catch(_){ }
     migrateData();
@@ -8111,6 +8185,7 @@ function renderAll(){
     if($('#docNumber')) $('#docNumber').value='DEV-'+new Date().getFullYear()+'-001';
     renderDocLines(); renderDocumentPreview(); renderAll();
     openTab('today');
+    v19InviterPilote();
   }
   function quitterDemo(){
     if(document.referrer && window.history.length>1) window.history.back();
@@ -8219,7 +8294,7 @@ function renderAll(){
     setTimeout(leverVoile,8000); }
 })();
 </script>
-<div style="text-align:center;padding:14px 0 24px;color:#718077;font-size:10px">MEMO • V19.4</div>
+<div style="text-align:center;padding:14px 0 24px;color:#718077;font-size:10px">MEMO • V19.5</div>
 <div id="v19Bandeau" role="status" aria-live="polite" hidden></div>
 <script>
 setTimeout(()=>document.documentElement.classList.remove('v19-boot'),8000);
@@ -8245,5 +8320,22 @@ document.addEventListener('DOMContentLoaded',()=>{
 })();
 </script>
 
+
+<!-- V19.5 — invitation au pilote, affichée seulement en démo. Formulaire en clair dans la page pour que Netlify le détecte. -->
+<aside class="v19-invit" id="v19Invit" hidden aria-labelledby="v19InvitTitre">
+  <button class="v19-invit-x" type="button" data-v19invit="fermer" aria-label="Fermer">×</button>
+  <h3 id="v19InvitTitre">Ça vous parle ?</h3>
+  <p>Recevez votre accès au pilote gratuit par mail : 30 jours avec vos propres devis, sans carte bancaire.</p>
+  <form id="v19InvitForm" name="pilote" method="POST" action="/" data-netlify="true" netlify-honeypot="site-web">
+    <input type="hidden" name="form-name" value="pilote">
+    <input type="hidden" name="origine" value="demo">
+    <p class="hp" aria-hidden="true"><label>Ne pas remplir <input name="site-web" tabindex="-1" autocomplete="off"></label></p>
+    <label for="v19InvitMail">Votre email professionnel<input type="email" id="v19InvitMail" name="email" required maxlength="254" autocomplete="email"></label>
+    <label for="v19InvitMetier">Votre métier (facultatif)<input type="text" id="v19InvitMetier" name="metier" maxlength="120" placeholder="Ex. : plombier, rénovation, couverture"></label>
+    <div class="v19-invit-btns"><button type="submit" class="v19-invit-ok" id="v19InvitEnvoyer">Recevoir mon accès</button><button type="button" class="v19-invit-tard" data-v19invit="plus-tard">Plus tard</button></div>
+    <p class="v19-invit-rgpd">Votre email sert uniquement à vous envoyer l’accès au pilote et à vous en reparler : ni revendu, ni utilisé pour de la publicité. <a href="https://memopilot.fr/confidentialite.html#pilote" target="_blank" rel="noopener">En savoir plus</a></p>
+    <p class="v19-invit-etat" id="v19InvitEtat" role="status" aria-live="polite"></p>
+  </form>
+</aside>
 </body>
 </html>
